@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+        <style>
+            body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+
+                margin: 0;
+                overflow: hidden;
+                background-color: #AAAAAA;
+                background-attachment: fixed !important;
+            }
+        </style>
+        <style>
+            body {
+                font-family: Monospace;
+                margin: 0px;
+                overflow: hidden;
+            }
+        </style>
+    </head>
+<body>
+
+<script id="vertShader" type="shader">
+varying vec2 vUv;
+void main() {
+    vUv = vec2( uv.x, 1.0-uv.y );
+    gl_Position = projectionMatrix *
+    modelViewMatrix * vec4(position, 1.0 );
+}
+</script>
+
+<script id="imgTransMatFrag" type="shader">
+uniform sampler2D image;
+uniform float scaleFactor;
+uniform bool bilinearFiltering;
+varying vec2 vUv;
+    
+void main(void) {
+    float X = gl_FragCoord.x / scaleFactor;
+    float Y = gl_FragCoord.y / scaleFactor;
+    
+    vec4 textureValue = texelFetch(image, ivec2(int(X), int(Y)), 0);
+
+    if (bilinearFiltering) {
+
+        ivec2 BLCoord = ivec2(floor(X), floor(Y));
+        ivec2 BRCoord = ivec2(ceil(X), floor(Y));
+        ivec2 TLCoord = ivec2(floor(X), ceil(Y));
+        ivec2 TRCoord = ivec2(ceil(X), ceil(Y));
+
+        vec4 BLVal = texelFetch( image, BLCoord, 0 );
+        vec4 BRVal = texelFetch( image, BRCoord, 0 );
+        vec4 TLVal = texelFetch( image, TLCoord, 0 );
+        vec4 TRVal = texelFetch( image, TRCoord, 0 );
+
+        vec4 top = TRVal * (X - floor(X)) + TLVal * (ceil(X) - X);
+        vec4 bottom = BRVal * (X - floor(X)) + BLVal * (ceil(X) - X);
+        vec4 average = top * (Y - floor(Y)) + bottom * (ceil(Y) - Y);
+
+        textureValue = average;
+    }
+    gl_FragColor = textureValue;
+}
+</script>
+
+<script id="imgArithMatFrag" type="shader">
+uniform sampler2D source1;
+uniform sampler2D source2;
+uniform int operator;
+varying vec2 vUv;
+
+void main() {
+    vec3 source1 = texture2D (source1, vUv ).rgb;
+    vec3 source2 = texture2D (source2, vUv ).rgb;
+	gl_FragColor.rgb = source1 - source2;
+    gl_FragColor.a = 1.0;
+}
+</script>
+
+<script id="convMatFrag" type="shader">
+varying vec2 vUv;
+uniform sampler2D image;
+uniform float mat[255];
+uniform int ksize;
+
+void main() {
+    vec3 texture = texture2D (image, vUv ).rgb;
+    int val = (ksize-1)/2;
+    vec2 uv = vUv.xy;
+    vec4 textureValue = vec4 ( 0.0, 0.0, 0.0, 0.0);
+    int counter = 0;
+    float total = 0.0;
+    for (int i = -val; i <= val; ++i)
+        for (int j = -val; j <= val; ++j) {
+            textureValue += texelFetch(image, ivec2(j+int(gl_FragCoord.x), i+int(gl_FragCoord.y)), 0 )  * mat[counter];
+            counter++;
+            total += mat[counter];
+        }
+
+    textureValue /= total;
+    gl_FragColor.rgb = textureValue.rgb;    
+    gl_FragColor.a = 1.0;
+}
+</script>
+
+<script id="knnMatFrag" type="shader">
+varying vec2 vUv;
+uniform sampler2D image;
+uniform int ksize;
+uniform int percent;
+
+bool smaller(vec4 a, vec4 b) {
+    float fa = float(a[0]) + float(a[1]) + float(a[2]);
+    float fb = float(b[0]) + float(b[1]) + float(b[2]);
+    return fa < fb;
+}
+
+void main() {
+    vec3 texture = texture2D (image, vUv ).rgb;
+    int val = (ksize-1)/2;
+    vec4 sorted[255];
+    int count = 0;
+    float total = 0.0;
+    for (int i = -val; i <= val; ++i){
+        for (int j = -val; j <= val; ++j) {
+            vec4 key = texelFetch(image, ivec2(j+int(gl_FragCoord.x), i+int(gl_FragCoord.y)), 0 );
+            int k = count - 1;
+            while (k >= 0 && smaller(key, sorted[k])){
+                sorted[k + 1] = sorted[k];
+                --k;
+            }
+            sorted[k + 1] = key;
+            count++;
+        }
+    }
+
+    int hallf = int(((int((ksize*ksize) / 2) - 1) * percent) / 100);
+    int ini = int((ksize*ksize) / 2) - hallf;
+    int end = ((ksize*ksize) / 2) + hallf;
+    if ((ksize*ksize) % 2 == 0) ++end;
+
+    float b = 0.0;
+    float g = 0.0;
+    float r = 0.0;
+
+    for (int k = ini; k <= end; k++) {
+        r += float(sorted[k][0]);
+        g += float(sorted[k][1]);
+        b += float(sorted[k][2]);
+    }
+    float div = float(end - ini + 1);
+    vec3 res = vec3 ( r/div, g/div, b/div);
+
+    gl_FragColor.rgb = res;    
+    gl_FragColor.a = 1.0;
+}
+</script>
+<script type="module" src="scripts/script3.js"></script>
+</body>
+</html>
